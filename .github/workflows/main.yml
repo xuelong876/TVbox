@@ -1,54 +1,56 @@
-name: 'update schedule'
+name: TVBox 直播源自动更新
 
 on:
   schedule:
-      - cron:  '0 */12 * * *'
+    - cron: '0 */12 * * *'  # 每12小时定时更新（UTC时间，对应北京时间+8）
   push:
-    branches:    
-      - master
+分支:
+      - master  # 匹配你仓库的分支名，若为main则改为main
+  workflow_dispatch:  # 新增手动触发，方便调试
+
 jobs:
-  push:
-      runs-on: ${{ matrix.operating-system }}
-      strategy:
-        matrix:
-          # in this example, there is a newer version already installed, 3.7.7, so the older version will be downloaded
-          operating-system: ['ubuntu-20.04']
-      steps:
-      - uses: actions/checkout@v3 # Checking out the repo
-      - name: Run with setup-python 3.9
-        uses: actions/setup-python@v4
+  update-live-source:
+    runs-on: ubuntu-20.04
+    timeout-minutes: 60  # 延长超时，适配13个收藏频道的爬取耗时
+    steps:
+      # 1. 检出仓库代码（含config.py/main.py/demo.txt）
+      - name: 检出代码
+        uses: actions/checkout@v4  # 升级到最新版，兼容性更好
+
+      # 2. 配置Python环境（3.9，与你原有配置一致）
+      - name: 配置Python 3.9
+        uses: actions/setup-python@v5
         with:
           python-version: '3.9'
-          update-environment: false
-          cache: 'pipenv'
+          cache: 'pip'  # 缓存pip依赖，加速安装
 
+      # 3. 安装系统依赖（Chrome浏览器+驱动）
+      - name: 安装Chrome及驱动
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y chromium-browser chromium-chromedriver
+          export PATH=$PATH:/usr/lib/chromium-browser/
 
-      - name: Install Selenium
+      # 4. 安装Python全部依赖（匹配main.py需求）
+      - name: 安装项目依赖
         run: |
-            sudo pip3 install selenium
-      - name: Set up Chrome
-        uses: browser-actions/setup-chrome@latest
-        with:
-          chrome-version: stable
-      - name: Download chrome driver
-        uses: nanasess/setup-chromedriver@master
-      - name: Launch chrome driver
+          pip install --upgrade pip
+          pip install selenium selenium-stealth aiohttp beautifulsoup4 pipenv
+
+      # 5. 执行核心脚本（爬取/校验/排序直播源，生成result.txt）
+      - name: 执行直播源更新脚本
+        run: python main.py
+
+      # 6. 提交更新（带容错，无变更则跳过）
+      - name: 提交result.txt到仓库
         run: |
-            export DISPLAY=:99
-            chromedriver --url-base=/wd/hub &
-            sudo Xvfb -ac :99 -screen 0 1280x1024x24 > /dev/null 2>&1 & # optional         
-        
-      - name: Install pipenv
-        run: pip3 install --user pipenv
-      - name: Install dependecies
-        run:  pipenv --python python3 && pipenv install
-      - name: Build
-        run: pipenv run build
-      - name: Commit and push if changed
-        run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          git diff
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          # 检查文件是否有变更，避免空提交报错
           git add result.txt
-          git commit -m "Github Action Auto Updated"
-          git push
+          if git diff --cached --quiet; then
+            echo "无直播源更新，跳过提交"
+          else
+            git commit -m "Auto update live sources $(date +'%Y-%m-%d %H:%M:%S')"
+            git push
+          fi
