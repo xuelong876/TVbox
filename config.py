@@ -7,7 +7,7 @@ favorite_list = [
     "CCTV11",
     "梨园频道",
     "河南梨园",
-    "郑州影视戏曲",
+    "郑州影视戏曲"
 
 ]
 favorite_page_num = 5
